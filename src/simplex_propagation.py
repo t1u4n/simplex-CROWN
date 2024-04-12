@@ -71,7 +71,24 @@ def simplex_propagation(model: nn.Sequential, x0: Tensor, eps: float) -> nn.Sequ
     
     return nn.Sequential(*new_layers)
 
+def simplex_propagation_orig(model: nn.Sequential, x0: Tensor, eps: float) -> nn.Sequential:
+    # Each linear except the final layer should be followed by a ReLU activation layer
+    layers = [deepcopy(l) for l in model]
 
+    layers[0] = convert_first_layer(layers[0], x0, eps)
+    alphas = []
+    for i, layer in enumerate(layers):
+        if isinstance(layer, nn.ReLU):
+            assert isinstance(layers[i-1], nn.Linear)
+            layer.weight = layers[i-1].weight
+            layer.bias = layers[i-1].bias
+        elif isinstance(layer, nn.Linear):
+            assert i == len(layers)-1 or isinstance(layers[i+1], nn.ReLU)
+            alpha = condition_layer(
+                layer=layer, lmbda=alphas[-1] if alphas else 1., scale=(i != len(layers)-1))
+            alphas.append(alpha)
+    
+    return nn.Sequential(*layers)
 
 
 
@@ -144,6 +161,77 @@ def test_does_not_modify_final_output(num: int, eps: float) -> None:
         
     print(f"All {num} tests passed! Final outputs haven't been modified.")
 
+def test_output_of_all_layers_lie_on_simplex_for_orig(num: int, eps: float) -> None:
+    model = nn.Sequential(
+                nn.Linear(28*28, 128),
+                nn.ReLU(),
+                nn.Linear(128, 64),
+                nn.ReLU(),
+                nn.Linear(64, 10)
+            )
+    model.load_state_dict(torch.load('models/relu_model.pth'))
+    model.eval()
+
+    def _generate_simplex_input(dim: int) -> Tensor:
+        # Generate a random point on the unit hyper-simplex (simplex).
+        vec = torch.rand(dim)
+        vec /= torch.sum(vec)
+        return vec
+    
+    def _is_in_simplex(vec: Tensor) -> bool:
+        return (torch.sum(vec) <= 1.) and (torch.all(vec >= 0))
+
+    for i in range(num):
+        # Generate random input of size
+        new_model = simplex_propagation_orig(model, torch.rand(1, 28*28), eps)
+        x = _generate_simplex_input(2*28*28).unsqueeze(0)
+        
+        outputs = []
+        for j, layer in enumerate(new_model):
+            x = layer(x)
+            outputs.append(x)
+            if isinstance(layer, SimplexNeuron):
+                assert _is_in_simplex(x), f"Test {i}: Layer {j} output is not in simplex, sum is {torch.sum(x)}, all positive {torch.all(x>=0)}"
+
+    print(f"All {num} tests passed! Output of each layer lies on the simplex.")
+
+def test_does_not_modify_final_output_for_orig(num: int, eps: float) -> None:
+    model = nn.Sequential(
+                nn.Linear(28*28, 128),
+                nn.ReLU(),
+                nn.Linear(128, 64),
+                nn.ReLU(),
+                nn.Linear(64, 10)
+            )
+    model.load_state_dict(torch.load('models/relu_model.pth'))
+    model.eval()
+
+    def _generate_simplex_input(dim: int) -> Tensor:
+        # Generate a random point on the unit hyper-simplex (simplex).
+        vec = torch.rand(dim)
+        vec /= torch.sum(vec)
+        return vec
+
+    for i in range(num):
+        # Generate random input of size
+        x0 = torch.rand(1, 28*28)
+        layers = [deepcopy(l) for l in model]
+        layers[0] = convert_first_layer(layers[0], x0, eps)
+
+        new_model = simplex_propagation_orig(model, x0, eps)
+        modified_model = nn.Sequential(*layers)
+
+        simplex_inp = _generate_simplex_input(2*28*28).unsqueeze(0)
+        
+        orig_out = modified_model(simplex_inp)
+        new_out = new_model(simplex_inp)
+
+        assert torch.allclose(orig_out, new_out), f"Test {i}, original output: {orig_out}, new output: {new_out}"
+        
+    print(f"All {num} tests passed! Final outputs haven't been modified.")
+
 if __name__=="__main__":
     test_output_of_all_layers_lie_on_simplex(500, 1e-3)
     test_does_not_modify_final_output(500, 1e-3)
+    test_output_of_all_layers_lie_on_simplex_for_orig(500, 1e-3)
+    test_does_not_modify_final_output_for_orig(500, 1e-3)
