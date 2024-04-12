@@ -181,10 +181,14 @@ if __name__ == '__main__':
     eps = 0.03
 
     print(f"Verifiying Pertubation - {eps}")
+
+    print("----------------------------------------------------")
+    print("Auto_LiRPA CROWN method:")
+
     """Auto_LiRPA method"""
     from auto_LiRPA.perturbations import PerturbationLpNorm
     from auto_LiRPA import BoundedModule, BoundedTensor
-    ptb = PerturbationLpNorm(eps=eps, norm=np.inf)
+    ptb = PerturbationLpNorm(eps=eps, norm=1., x_L=torch.zeros_like(x_test).float(), x_U=torch.ones_like(x_test).float())
     bounded_x = BoundedTensor(x_test, ptb)
     auto_lirpa_bounded_model = BoundedModule(model, torch.zeros_like(x_test))
     auto_lirpa_bounded_model.eval()
@@ -194,25 +198,9 @@ if __name__ == '__main__':
         for j in range(y_size):
             print('f_{j}(x_{i}): {l:8.4f} <= f_{j}(x_{i}+delta) <= {u:8.4f}'.format(
                 j=j, i=i, l=lirpa_lb[i][j].item(), u=lirpa_ub[i][j].item()))
-
     print("----------------------------------------------------")
-
-    """Simplex method"""
-    new_model = simplex_propagation(model, x_test, eps)
-
-    x_u = torch.ones(1, 2*28*28)
-    x_l = torch.zeros(1, 2*28*28)
-
-    boundedmodel = BoundedSequential.convert(new_model)
-    ub, _ = boundedmodel.compute_bounds(x_U=x_u, x_L=x_l, upper=True, lower=False)
-    for i in range(batch_size):
-        for j in range(y_size):
-            assert lirpa_lb[i][j].item() <= ub[i][j].item()
-            print('f_{j}(x_{i}): {l:8.4f} <= f_{j}(x_{i}+delta) <= {u:8.4f}'.format(
-                j=j, i=i, l=lirpa_lb[i][j].item(), u=ub[i][j].item()))
-
-    print("----------------------------------------------------")
-
+    
+    print("CROWN on converted model")
     """Converted model using CROWN"""
     new_model = simplex_propagation_orig(model, x_test, eps)
 
@@ -225,3 +213,19 @@ if __name__ == '__main__':
         for j in range(y_size):
             print('f_{j}(x_{i}): {l:8.4f} <= f_{j}(x_{i}+delta) <= {u:8.4f}'.format(
                 j=j, i=i, l=lb[i][j].item(), u=ub[i][j].item()))
+    print("----------------------------------------------------")
+
+    print("Simplex method:")
+    """Simplex method"""
+    new_model = simplex_propagation(model, x_test, eps)
+
+    x_u = torch.ones(1, 2*28*28)
+    x_l = torch.zeros(1, 2*28*28)
+
+    boundedmodel = BoundedSequential.convert(new_model)
+    simplex_ub, _ = boundedmodel.compute_bounds(x_U=x_u, x_L=x_l, upper=True, lower=False)
+    for i in range(batch_size):
+        for j in range(y_size):
+            assert lb[i][j].item() <= simplex_ub[i][j].item()
+            print('f_{j}(x_{i}): {l:8.4f} <= f_{j}(x_{i}+delta) <= {u:8.4f}'.format(
+                j=j, i=i, l=lb[i][j].item(), u=simplex_ub[i][j].item()))
