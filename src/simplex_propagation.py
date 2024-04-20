@@ -29,11 +29,11 @@ def convert_first_layer(layer: nn.Linear, x0: Tensor, eps: float) -> nn.Linear:
     return lin_layer
 
 def compute_alpha(W: Tensor, bias: Tensor, lmbda: float=1.) -> float:
-    wb = W + bias[:, None]
-    wb_clamped = torch.clamp(wb, min=0) * lmbda
+    wb = W * lmbda + bias[:, None]
+    wb_clamped = torch.clamp(wb, min=0)
     wb_max = torch.max(torch.sum(wb_clamped, dim=0))
 
-    b_clamped = torch.clamp(bias, min=0) * lmbda
+    b_clamped = torch.clamp(bias, min=0)
     b_max = torch.sum(b_clamped)
 
     alpha = torch.max(wb_max, b_max)
@@ -68,7 +68,6 @@ def simplex_propagation(model: nn.Sequential, x0: Tensor, eps: float) -> nn.Sequ
                 new_layers.append(SimplexNeuron(layer.weight, layer.bias))
             else:
                 new_layers.append(deepcopy(layer))
-    
     return nn.Sequential(*new_layers)
 
 def simplex_propagation_orig(model: nn.Sequential, x0: Tensor, eps: float) -> nn.Sequential:
