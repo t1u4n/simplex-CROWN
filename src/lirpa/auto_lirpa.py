@@ -69,7 +69,6 @@ class AutoLirpa():
         b_term = None
         rho = copy.deepcopy(self.initial_rho)
         lay_idx = copy.deepcopy(self.initial_lay_idx)
-        rho_split=False
 
         with torch.enable_grad():
             while lay_idx > 0:
@@ -108,21 +107,13 @@ class AutoLirpa():
                 alpha_u.masked_fill_(lbs > 0, 1)
                 alpha_u.masked_fill_(ubs <= 0, 0)
 
-                # alpha_l = (ubs >= torch.abs(lbs)).type(lbs.dtype)
                 alpha_l = las
                 with torch.no_grad():
                     alpha_l.masked_fill_(lbs > 0, 1)
                     alpha_l.masked_fill_(ubs <= 0, 0)
 
-                ones_ten = torch.ones_like(ubs)
-                zeros_ten = torch.zeros_like(ubs)
-
                 ## lirpa
                 rho = torch.where(lbda >= 0, alpha_l.unsqueeze(1), alpha_u.unsqueeze(1)) * lbda#(output(batch_size modulo)*input shape)
-
-                ## kw
-                # rho = alpha_u.unsqueeze(1) * lbda#(output(batch_size modulo)*input shape)
-                #####
 
                 lay_idx -= 1
 
@@ -298,10 +289,8 @@ def opt_lirpa_input_simplex(lay, b_term, rho):
     with torch.enable_grad():
         b_term += lay.bias_backward(rho)
         lin_eq = lay.backward(rho)
-
         lin_eq_matrix = lin_eq.view(lin_eq.shape[0],lin_eq.shape[1],-1)
-
-        (b,c) = torch.min(lin_eq_matrix, 2)
+        b, _ = torch.min(lin_eq_matrix, 2)
         bound = b_term + torch.clamp(b, None, 0)
 
     return bound 
@@ -309,19 +298,10 @@ def opt_lirpa_input_simplex(lay, b_term, rho):
 def opt_lirpa_input_dp(lay, b_term, rho_planet, rho_u_dp, inp_bound=None):
     with torch.enable_grad():
         b_term += lay.dp_bias_backward(rho_u_dp) + lay.bias_backward(rho_planet)
-
-        start_time = time.time()
-        lin_eq = lay.dp_backward(rho_u_dp, inp_bound)
-        # print('dp backward time: ', time.time()-start_time)
-        
-        start_time = time.time()
+        lin_eq = lay.dp_backward(rho_u_dp)
         lin_eq += lay.backward(rho_planet)
-        # print('backward time: ', time.time()-start_time)
-
-
         lin_eq_matrix = lin_eq.view(lin_eq.shape[0],lin_eq.shape[1],-1)
-
-        (b,c) = torch.min(lin_eq_matrix, 2)
+        b, _ = torch.min(lin_eq_matrix, 2)
         bound = b_term + torch.clamp(b, None, 0)
     return bound 
 

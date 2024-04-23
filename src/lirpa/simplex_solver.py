@@ -4,7 +4,7 @@ import copy, time, math
 from auto_lirpa import AutoLirpa
 from utils import create_final_coeffs_slice
 import numpy as np
-from linear_op import LinearOp, BatchLinearOp
+from linear_op import LinearOp
 
 class SimplexLP():
     '''
@@ -169,10 +169,9 @@ class SimplexLP():
             ###############
 
             ###############
-            # STEP-2- construct BatchLinearOp
+            # STEP-2- construct LinearOp
             ###############
-            cond_w_1_unsq = cond_w_1.unsqueeze(0)
-            cond_layer = BatchLinearOp(cond_w_1_unsq, cond_b_1)
+            cond_layer = LinearOp(cond_w_1, cond_b_1)
             ###############
 
             if conditioning:
