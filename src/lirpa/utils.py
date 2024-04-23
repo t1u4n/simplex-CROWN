@@ -28,15 +28,4 @@ def create_final_coeffs_slice(start_batch_index, end_batch_index, batch_size, nb
         slice_diag[:] = torch.ones_like(slice_diag)
         slice_coeffs = slice_coeffs.expand((batch_size, *slice_coeffs.shape))
         slice_coeffs = slice_coeffs.view((batch_size, slice_coeffs.size(1),) + node_layer_shape)
-        # # let us say that outshape is 4 and batch_size is 6, then these are the 2 matrices this function will produce.
-        # # after changing the shape to output shape
-        # it shows that in the first output we will keep lower bound of first neuron. then lower bound of second and so on.
-        # -1 0  0  0
-        # 0  -1 0  0
-        # 0  0  -1 0
-        # 0  0  0  -1
-        # 1  0  0  0
-        # 0  1  0  0
-        # 0  0  1  0
-        # 0  0  0  1
     return slice_coeffs

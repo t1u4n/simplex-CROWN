@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-import copy, time, math
+import time, math
 from auto_lirpa import AutoLirpa
 from utils import create_final_coeffs_slice
 import numpy as np
@@ -33,7 +33,6 @@ class SimplexLP():
         self.max_batch = max_batch
 
         self.init_cut_coeffs = []
-
         self.seed = seed
         self.dp = dp
     
@@ -53,8 +52,7 @@ class SimplexLP():
             auto_lirpa_object = AutoLirpa(*args, **kwargs)
             auto_lirpa_object.crown_initialization(*args, **kwargs)
 
-            bounds_auto_lirpa = auto_lirpa_object.auto_lirpa_optimizer(*args, **kwargs, dp=True, opt_args=opt_args)
-            # bounds = torch.max(bounds, bounds_auto_lirpa)
+            bounds_auto_lirpa = auto_lirpa_object.auto_lirpa_optimizer(*args, **kwargs)
 
             return bounds_auto_lirpa
 
