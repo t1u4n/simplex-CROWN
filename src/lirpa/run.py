@@ -24,5 +24,12 @@ eps = 0.03
 
 solver = SimplexLP(layers)
 with torch.no_grad():
-    solver.set_solution_optimizer("best_naive_dp", None)
     solver.define_linear_approximation((x_test, eps))
+
+def print_bounds(lb, ub, batch_sz, y_sz):
+    for i in range(batch_sz):
+        for j in range(y_sz):
+            print('f_{j}(x_{i}): {l:8.4f} <= f_{j}(x_{i}+delta) <= {u:8.4f}'.format(
+                j=j, i=i, l=lb[i][j].item(), u=ub[i][j].item()))
+            
+print_bounds(solver.lower_bounds[-1], solver.upper_bounds[-1], batch_size, y_size)

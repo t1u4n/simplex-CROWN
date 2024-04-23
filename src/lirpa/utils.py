@@ -1,5 +1,5 @@
 import torch
-import time
+import math
 
 def bdot(elt1, elt2):
     # Batch dot product
@@ -40,28 +40,3 @@ def create_final_coeffs_slice(start_batch_index, end_batch_index, batch_size, nb
         # 0  0  1  0
         # 0  0  0  1
     return slice_coeffs
-    
-def get_relu_mask(lb, ub):
-    # given a layer's lower and upper bounds (tensors), return a relu mask, which stores which relus are ambiguous.
-    # 1=passing, 0=blocking, -1=ambiguous. Shape: dom_batch_size x layer_width
-    passing = (lb >= 0)
-    blocking = (ub <= 0)
-    ambiguous = (~passing & ~blocking)
-    return passing.type(torch.float) * 1 + ambiguous.type(torch.float) * (-1)
-
-def prod(elts):
-    if type(elts) in [int, float]:
-        return elts
-    else:
-        prod = 1
-        for elt in elts:
-            prod *= elt
-        return prod
-    
-def get_relu_mask(lb, ub):
-    # given a layer's lower and upper bounds (tensors), return a relu mask, which stores which relus are ambiguous.
-    # 1=passing, 0=blocking, -1=ambiguous. Shape: dom_batch_size x layer_width
-    passing = (lb >= 0)
-    blocking = (ub <= 0)
-    ambiguous = (~passing & ~blocking)
-    return passing.type(torch.float) * 1 + ambiguous.type(torch.float) * (-1)

@@ -1,27 +1,10 @@
 import torch
 import torch.nn as nn
 import copy, time, math
-from autolirpa_opt_dp import autolirpa_opt_dp
 from auto_lirpa import AutoLirpa
-from utils import bdot, get_relu_mask, create_final_coeffs_slice, prod
+from utils import create_final_coeffs_slice
 import numpy as np
 from linear_op import LinearOp, BatchLinearOp
-
-default_params = {
-    "initial_eta": 100,
-    "nb_inner_iter": 100,
-    "nb_outer_iter": 10,
-    "nb_iter": 500,
-    "anderson_algorithm": "saddle",  # either saddle or prox
-    "bigm": "init", # whether to use the specialized bigm relaxation solver. Alone: "only". As initializer: "init"
-    "bigm_algorithm": "adam",  # either prox or adam
-    "init_params": {
-        'nb_outer_iter': 100,
-        'initial_step_size': 1e-3,
-        'final_step_size': 1e-6,
-        'betas': (0.9, 0.999)
-    }
-}
 
 class SimplexLP():
     '''
@@ -33,103 +16,31 @@ class SimplexLP():
     return: so the define_linear_approximation fn returns a net whose input lies in simplex and all other intermediate layers lie in a simplex too
     '''
 
-    def __init__(self, 
-        layers, 
-        debug=False, 
-        params=None, 
-        view_tensorboard=False, 
-        precision=torch.float, 
-        store_bounds_progress=-1, 
-        store_bounds_primal=False, 
-        max_batch=20000, 
-        seed=0,
-        dp=True,
-        tgt=1):
+    def __init__(self, layers, max_batch=20000, seed=0, dp=True,):
         """
         :param store_bounds_progress: whether to store bounds progress over time (-1=False 0=True)
         :param store_bounds_primal: whether to store the primal solution used to compute the final bounds
         :param max_batch: maximal batch size for parallel bounding çomputations over both output neurons and domains
         """
-        self.optimizers = {
-            'best_naive_dp': self.best_naive_dp_optimizer,
-            # 'opt_dp': self.opt_dp_optimizer,
-            # 'auto_lirpa_optimizer': self.auto_lirpa_optimizer,
-        }
-
         self.layers = layers
         self.net = nn.Sequential(*layers)
 
         for param in self.net.parameters():
             param.requires_grad = False
 
-        self.optimize, _ = self.best_naive_dp_optimizer(None)
+        self.optimize = self.best_naive_dp_optimizer()
 
-        self.store_bounds_progress = store_bounds_progress
-        self.store_bounds_primal = store_bounds_primal
-
-        # store which relus are ambiguous. 1=passing, 0=blocking, -1=ambiguous. Shape: dom_batch_size x layer_width
-        self.relu_mask = []
         self.max_batch = max_batch
 
-        self.debug = debug
-        self.view_tensorboard = view_tensorboard
-        if self.view_tensorboard:
-            from torch.utils.tensorboard import SummaryWriter
-            self.writer = SummaryWriter(comment="bigm")
-
-        self.params = dict(default_params, **params) if params is not None else default_params
-        # self.bigm_init = self.params["bigm"] and (self.params["bigm"] == "init")
-        # self.bigm_only = self.params["bigm"] and (self.params["bigm"] == "only")
-        # self.cut_init = ("cut" in self.params) and self.params["cut"] and (self.params["cut"] == "init")
-        # self.cut_only = ("cut" in self.params) and self.params["cut"] and (self.params["cut"] == "only")
-
-        self.precision = precision
         self.init_cut_coeffs = []
 
         self.seed = seed
         self.dp = dp
-
-        self.tgt = tgt #target label
-
-    def init_optimizer(self, method_args):
-        return self.init_optimize, None
     
-    def set_solution_optimizer(self, method, method_args=None):
-        assert method in self.optimizers
-        self.optimize, _ = self.optimizers[method](method_args)
-    
-    def best_naive_dp_optimizer(self, method_args):
+    def best_naive_dp_optimizer(self):
         # best bounds out of kw and naive interval propagation
 
         def optimize(*args, **kwargs):
-            # self.set_decomposition('pairs', 'KW')
-            # bounds_kw = kw_fun(*args, **kwargs)
-
-            # self.set_decomposition('pairs', 'naive')
-            # bounds_naive = naive_fun(*args, **kwargs)
-            # bounds = torch.max(bounds_kw, bounds_naive)
-
-            # for cifar
-            # opt_args = {
-            #     'nb_iter': 20,
-            #     'lower_initial_step_size': 0.0001,
-            #     'lower_final_step_size': 1,
-            #     'upper_initial_step_size': 1e2,
-            #     'upper_final_step_size': 1e3,
-            #     'betas': (0.9, 0.999)
-            # }
-
-            ## for food101 old__1
-            # opt_args = {
-            #         'nb_iter': 20,
-            #         'lower_initial_step_size': 10,
-            #         'lower_final_step_size': 0.01,
-            #         'upper_initial_step_size': 0.001,
-            #         'upper_final_step_size': 1e3,
-            #         'betas': (0.9, 0.999)
-            #     }
-
-            # ## for food101 newer
             opt_args = {
                     'nb_iter': 20,
                     'lower_initial_step_size': 0.00001,
@@ -147,27 +58,7 @@ class SimplexLP():
 
             return bounds_auto_lirpa
 
-        return optimize, [None, None]
-
-    def opt_dp_optimizer(self, method_args):
-        # best bounds out of kw and naive interval propagation
-        kw_fun, kw_logger = self.optimizers['init'](None)
-        naive_fun, naive_logger = self.optimizers['init'](None)
-
-        def optimize(*args, **kwargs):
-            # self.set_decomposition('pairs', 'KW')
-            # bounds_kw = kw_fun(*args, **kwargs)
-
-            # self.set_decomposition('pairs', 'naive')
-            # bounds_naive = naive_fun(*args, **kwargs)
-            # bounds = torch.max(bounds_kw, bounds_naive)
-
-            bounds_auto_lirpa = autolirpa_opt_dp(*args, **kwargs)
-            # bounds = torch.max(bounds, bounds_auto_lirpa)
-
-            return bounds_auto_lirpa
-
-        return optimize, [kw_logger, naive_logger]
+        return optimize
     
     def define_linear_approximation(self, input_domain, emb_layer=False, no_conv=False, override_numerical_errors=False):
         '''
@@ -179,9 +70,6 @@ class SimplexLP():
         the convolutional layers into equivalent linear layers.
         lower_bounds [input_bounds,1st_layer_output,2nd_layeroutput ....]
         '''
-
-        # store which relus are ambiguous. 1=passing, 0=blocking, -1=ambiguous. Shape: dom_batch_size x layer_width
-        self.relu_mask = []
         self.no_conv = no_conv
         # Setup the bounds on the inputs
         self.input_domain = input_domain
@@ -190,18 +78,6 @@ class SimplexLP():
 
         next_is_linear = True
         conditioning = True
-        prop_simp_bounds = False
-
-        ################################
-        ## This checks for the scenario when the first layer is a flatten layer
-        ################################
-        first_layer_flatten = False
-        if not (isinstance(self.layers[0], nn.Conv2d) or isinstance(self.layers[0], nn.Linear)):
-            first_layer_flatten = True
-            self.layers_copy = copy.deepcopy(self.layers)
-            self.layers = self.layers[1:]
-        ################################
-        ################################
 
         for lay_idx, layer in enumerate(self.layers):
             if lay_idx == len(self.layers)-1:
@@ -211,43 +87,26 @@ class SimplexLP():
                 assert next_is_linear
                 next_is_linear = False
                 layer_opt_start_time = time.time()
-                if not emb_layer:
-                    l_1, u_1, init_cut_coeff, cond_first_linear, lmbd = self.get_preact_bounds_first_layer(X, eps, layer, no_conv, conditioning = conditioning, seed=self.seed)
-                else:
-                    l_1, u_1, init_cut_coeff, cond_first_linear, lmbd = self.get_preact_bounds_first_emb_layer(X, eps, layer, no_conv, conditioning = conditioning, seed=self.seed)
+                l_1, u_1, init_cut_coeff, cond_first_linear, lmbd = self.get_preact_bounds_first_layer(X, eps, layer, no_conv, conditioning = conditioning, seed=self.seed)
                 layer_opt_end_time = time.time()
                 time_used = layer_opt_end_time - layer_opt_start_time
                 print(f"Time used for layer {lay_idx}: {time_used}")
                 if init_cut_coeff is not None:
                     self.init_cut_coeffs.append(init_cut_coeff)
-
-                if no_conv:
-                    # when linearizing conv layers, we need to keep track of the original shape of the bounds
-                    self.original_shape_lbs = [-torch.ones_like(X), l_1]
-                    self.original_shape_ubs = [torch.ones_like(X), u_1]
-                    X = X.view(X.shape[0], -1)
-                    X = X.view(X.shape[0], -1)
-                    X = X.view(X.shape[0], -1)
-                    X = X.view(X.shape[0], -1)
                 
-                if not emb_layer:
-                    self.lower_bounds = [-torch.ones(*X.shape[:-1], 2*X.shape[-1]), l_1]
-                    self.upper_bounds = [torch.ones(*X.shape[:-1], 2*X.shape[-1]), u_1]
-                else:
-                    self.lower_bounds = [-torch.ones(1, X[1].shape[0]), l_1]
-                    self.upper_bounds = [torch.ones(1, X[1].shape[0]), u_1]
+                self.lower_bounds = [-torch.ones(*X.shape[:-1], 2*X.shape[-1]), l_1]
+                self.upper_bounds = [torch.ones(*X.shape[:-1], 2*X.shape[-1]), u_1]
                 
                 weights = [cond_first_linear]
-                self.relu_mask.append(get_relu_mask(l_1, u_1))
 
 
-            elif isinstance(layer, nn.Conv2d) or isinstance(layer, nn.Linear):
+            elif isinstance(layer, nn.Linear):
                 assert next_is_linear
                 next_is_linear = False
 
                 orig_shape_prev_ub = self.original_shape_ubs[-1] if no_conv else None
                 layer_opt_start_time = time.time()
-                l_kp1, u_kp1, init_cut_coeff, obj_layer, obj_layer_orig, lmbd = self.build_simp_layer(self.upper_bounds[-1], self.lower_bounds[-1], layer, self.init_cut_coeffs, lmbd, no_conv, orig_shape_prev_ub=orig_shape_prev_ub, conditioning = conditioning, seed=self.seed, prop_simp_bounds=prop_simp_bounds)
+                l_kp1, u_kp1, init_cut_coeff, obj_layer, obj_layer_orig, lmbd = self.build_simp_layer(self.upper_bounds[-1], self.lower_bounds[-1], layer, self.init_cut_coeffs, lmbd, no_conv, orig_shape_prev_ub=orig_shape_prev_ub, conditioning = conditioning, seed=self.seed)
                 print('Conditioning time: ', time.time()-layer_opt_start_time)
 
                 weights.append(obj_layer)
@@ -256,12 +115,8 @@ class SimplexLP():
                 l_kp1_lirpa , u_kp1_lirpa = self.solve_problem(weights, self.lower_bounds, self.upper_bounds, override_numerical_errors=override_numerical_errors)
 
 
-                if prop_simp_bounds:
-                    l_kp1=torch.max(l_kp1, l_kp1_lirpa)
-                    u_kp1=torch.min(u_kp1, u_kp1_lirpa)
-                else:
-                    l_kp1=l_kp1_lirpa
-                    u_kp1=u_kp1_lirpa
+                l_kp1=l_kp1_lirpa
+                u_kp1=u_kp1_lirpa
 
 
                 assert (u_kp1 - l_kp1).min() >= 0, "Incompatible bounds"
@@ -272,25 +127,9 @@ class SimplexLP():
 
                 if lay_idx != len(self.layers)-1:
                     self.init_cut_coeffs.append(init_cut_coeff)
-
-                if no_conv:
-                    if isinstance(layer, nn.Conv2d):
-                        self.original_shape_lbs.append(
-                            l_kp1.view(obj_layer_orig.get_output_shape(self.original_shape_lbs[-1].unsqueeze(1).shape)).
-                            squeeze(1)
-                        )
-                        self.original_shape_ubs.append(
-                            u_kp1.view(obj_layer_orig.get_output_shape(self.original_shape_ubs[-1].unsqueeze(1).shape)).
-                            squeeze(1)
-                        )
-                    else:
-                        self.original_shape_lbs.append(l_kp1)
-                        self.original_shape_ubs.append(u_kp1)
+                    
                 self.lower_bounds.append(l_kp1)
                 self.upper_bounds.append(u_kp1)
-                if lay_idx < (len(self.layers)-1):
-                    # the relu mask doesn't make sense on the final layer
-                    self.relu_mask.append(get_relu_mask(l_kp1, u_kp1))
             elif isinstance(layer, nn.ReLU):
                 assert not next_is_linear
                 next_is_linear = True
@@ -466,7 +305,7 @@ class SimplexLP():
         ini_lbs, ini_ubs = weights[-1].interval_forward(torch.clamp(lower_bounds[-1], 0, None),
                                                         torch.clamp(upper_bounds[-1], 0, None))
         out_shape = ini_lbs.shape[1:]#this is the actual output shape
-        nb_out = prod(out_shape)#number of output neurons of that layer.
+        nb_out = math.prod(out_shape)#number of output neurons of that layer.
         batch_size = ini_lbs.shape[0]
 
         # if the resulting batch size from parallelizing over the output neurons boundings is too large, we need
