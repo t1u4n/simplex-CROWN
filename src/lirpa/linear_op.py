@@ -5,56 +5,39 @@ class LinearOp:
     def __init__(self, weights, bias):
         self.weights = weights
         self.bias = bias
-
         # convex hull coefficient
-        self.dp_weights = torch.clamp(self.weights.T + self.bias, 0, None) - torch.clamp(self.bias, 0, None)
-        self.dp_weights = self.dp_weights.T
-
-        self.alpha_coeff = 1
-        self.lmbd = torch.ones(bias.shape[0], dtype=torch.float, device=weights.device)
+        self.dp_weights = torch.relu(self.weights + self.bias.unsqueeze(1)) - torch.relu(self.bias.unsqueeze(1))
 
     def forward(self, inp):
         return F.linear(inp, self.weights, self.bias)
 
-    def interval_forward(self, lb_in, ub_in):
+    def interval_forward(self, lb, ub):
         pos_wt = torch.clamp(self.weights, 0, None)
         neg_wt = torch.clamp(self.weights, None, 0)
         pos_lay = LinearOp(pos_wt, self.bias)
         neg_lay = LinearOp(neg_wt, torch.zeros_like(self.bias))
-        lb_out = (pos_lay.forward(lb_in.unsqueeze(1)) + neg_lay.forward(ub_in.unsqueeze(1))).squeeze(1)
-        ub_out = (pos_lay.forward(ub_in.unsqueeze(1)) + neg_lay.forward(lb_in.unsqueeze(1))).squeeze(1)
+        lb_out = (pos_lay.forward(lb.unsqueeze(1)) + neg_lay.forward(ub.unsqueeze(1))).squeeze(1)
+        ub_out = (pos_lay.forward(ub.unsqueeze(1)) + neg_lay.forward(lb.unsqueeze(1))).squeeze(1)
 
         return lb_out, ub_out
 
     def backward(self, out):
         return torch.matmul(out, self.weights)
 
-    def simplex_conditioning(self, lmbd, conditioning=False):
-        w_kp1 = self.weights
-        b_kp1 = self.bias
-
-        wb = w_kp1 + b_kp1[:,None]
+    def simplex_conditioning(self):
+        wb = self.weights + self.bias[:,None]
         wb_clamped = torch.clamp(wb, 0, None)
-        lambda_wb_clamped = (wb_clamped.T*lmbd).T
+        lambda_wb_clamped = (wb_clamped.T).T
         wb_col_sum = torch.sum(lambda_wb_clamped, 0)
-        b_clamped = torch.clamp(b_kp1, 0, None)
-        lambda_b_clamped = b_clamped*lmbd
+        b_clamped = torch.clamp(self.bias, 0, None)
+        lambda_b_clamped = b_clamped
         b_sum = torch.sum(lambda_b_clamped)
-        init_cut_coeff = max(torch.max(wb_col_sum),b_sum)
-        if init_cut_coeff==0:
-            init_cut_coeff=torch.ones_like(init_cut_coeff)
+        alpha = max(torch.max(wb_col_sum), b_sum, 1.)
 
-        if conditioning:
-            w_kp1 = w_kp1 / init_cut_coeff
-            b_kp1 = b_kp1 / init_cut_coeff
-
-            self.weights = w_kp1
-            self.bias = b_kp1
-
-            self.dp_weights = torch.clamp(self.weights.T + self.bias, 0, None) - torch.clamp(self.bias, 0, None)
-            self.dp_weights = self.dp_weights.T
-        print("Hi")
-        return init_cut_coeff
+        self.weights /= alpha
+        self.bias /= alpha
+        self.dp_weights = torch.relu(self.weights + self.bias.unsqueeze(1)) - torch.relu(self.bias.unsqueeze(1))
+        return alpha
 
     def dp_forward(self, inp):
         return F.linear(inp, self.dp_weights, self.bias)

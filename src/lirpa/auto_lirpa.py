@@ -108,7 +108,7 @@ class AutoLirpa():
         # 2. Compute dL/da 
         # 3. optimize a's using Adam.
         """
-        num_epochs = 50
+        num_epochs = 20
         for _ in range(num_epochs):
             # 1. Compute L(x, a)
             bound = self.get_bound_dp_lirpa_backward(layers, lbs, ubs)
