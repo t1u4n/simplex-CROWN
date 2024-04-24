@@ -6,7 +6,8 @@ class LinearOp:
         self.weights = weights
         self.bias = bias
         # convex hull coefficient
-        self.dp_weights = torch.relu(self.weights + self.bias.unsqueeze(1)) - torch.relu(self.bias.unsqueeze(1))
+        self.convex_hull_coeff = torch.relu(self.weights + self.bias.unsqueeze(1)) \
+                                - torch.relu(self.bias.unsqueeze(1))
 
     def forward(self, inp):
         return F.linear(inp, self.weights, self.bias)
@@ -25,6 +26,7 @@ class LinearOp:
         return torch.matmul(out, self.weights)
 
     def simplex_conditioning(self):
+        # Compute scaling factor alpha
         wb = self.weights + self.bias[:,None]
         wb_clamped = torch.clamp(wb, 0, None)
         lambda_wb_clamped = (wb_clamped.T).T
@@ -36,17 +38,17 @@ class LinearOp:
 
         self.weights /= alpha
         self.bias /= alpha
-        self.dp_weights = torch.relu(self.weights + self.bias.unsqueeze(1)) - torch.relu(self.bias.unsqueeze(1))
+        self.convex_hull_coeff = torch.relu(self.weights + self.bias.unsqueeze(1)) - torch.relu(self.bias.unsqueeze(1))
         return alpha
 
-    def dp_forward(self, inp):
-        return F.linear(inp, self.dp_weights, self.bias)
+    def convex_hull_forward(self, inp):
+        return F.linear(inp, self.convex_hull_coeff, self.bias)
 
-    def dp_backward(self, out):
-        return torch.matmul(out, self.dp_weights)
+    def convex_hull_backward(self, out):
+        return torch.matmul(out, self.convex_hull_coeff)
 
     def bias_backward(self, out):
         return torch.matmul(out, self.bias)
 
-    def dp_bias_backward(self, out):
+    def convex_hull_bias_backward(self, out):
         return torch.matmul(out, self.bias.clamp(min=0))
