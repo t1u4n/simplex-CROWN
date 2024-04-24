@@ -5,10 +5,6 @@ class LinearOp:
     def __init__(self, weights, bias):
         self.weights = weights
         self.bias = bias
-        self.out_features = weights.shape[0]
-        self.in_features = weights.shape[1]
-        self.preshape = (self.in_features,)
-        self.postshape = (self.out_features,)
 
         # convex hull coefficient
         self.dp_weights = torch.clamp(self.weights.T + self.bias, 0, None) - torch.clamp(self.bias, 0, None)
@@ -32,10 +28,6 @@ class LinearOp:
 
     def backward(self, out):
         return torch.matmul(out, self.weights)
-
-    def __repr__(self):
-        return f'<Linear: {self.in_features} -> {self.out_features}>'
-
 
     def simplex_conditioning(self, lmbd, conditioning=False):
         w_kp1 = self.weights
@@ -61,6 +53,7 @@ class LinearOp:
 
             self.dp_weights = torch.clamp(self.weights.T + self.bias, 0, None) - torch.clamp(self.bias, 0, None)
             self.dp_weights = self.dp_weights.T
+        print("Hi")
         return init_cut_coeff
 
     def dp_forward(self, inp):

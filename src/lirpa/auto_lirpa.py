@@ -1,5 +1,5 @@
 import torch
-import copy
+from copy import deepcopy
 from utils import bdot
 from torch.optim import Adam
 
@@ -8,135 +8,110 @@ class AutoLirpa():
     This class implements the autolirpa method using backward fashion in primal space.
     """
 
-    def __init__(self, weights, additional_coeffs, lower_bounds, upper_bounds):
+    def __init__(self, layers, coeffs, lb, ub):
         """
         The object stores the lirpa coefficients lower_a and upper_a corresponding to the upper and lower bounds.
         """
-        self.lower_a = []
-        self.upper_a = []
-        for i in range(len(weights)):
-            self.lower_a.append(torch.ones_like(lower_bounds[i], requires_grad=True))
-            self.lower_a[i].grad = None
+        self.lower_a = [(ub[i] >= torch.abs(lb[i])).float().requires_grad_(True) for i in range(len(layers))]
+        self.upper_a = [torch.ones_like(ub[i], requires_grad=True) for i in range(len(layers))]
 
-            self.upper_a.append(torch.ones_like(upper_bounds[i], requires_grad=True))
-            self.upper_a[i].grad = None
+        def _find_layer_with_coeffs(n_layers, additional_coeffs):
+            for i in range(n_layers, 0, -1):
+                if i in additional_coeffs:
+                    return i, additional_coeffs[i]
+            return None, None
 
-        #######################
-        assert len(additional_coeffs) > 0
+        start_node, C = _find_layer_with_coeffs(len(layers), coeffs)
+        if start_node is not None:
+            start_node -= 1
 
-        final_lay_idx = len(weights)
-        if final_lay_idx in additional_coeffs:
-            # There is a coefficient on the output of the network
-            rho = additional_coeffs[final_lay_idx]
-            lay_idx = final_lay_idx
-        else:
-            # There is none. Just identify the shape from the additional coeffs
-            lay_idx = final_lay_idx -1
-            while lay_idx not in additional_coeffs:
-                lay_idx -= 1
-            # We now reached the time where lay_idx has an additional coefficient
-            rho = additional_coeffs[lay_idx]
-        lay_idx -= 1
-
-        self.initial_lay_idx = copy.deepcopy(lay_idx)
-        self.initial_rho = copy.deepcopy(rho)
-
+        self.start_node = start_node
+        self.C = deepcopy(C)
         self.optimizer = Adam(self.lower_a + self.upper_a, lr=1e-4)
 
-    def crown_initialization(self, weights, _, lower_bounds, upper_bounds):
-        """
-        initialized the lower coefficients as per crown
-        """
-        for i in range(len(weights)):
-            self.lower_a[i] = (upper_bounds[i] >= torch.abs(lower_bounds[i])).type(lower_bounds[i].dtype)
-            self.lower_a[i].requires_grad = True
-            self.lower_a[i].grad = None
-
-    def get_bound_dp_lirpa_backward(self, weights, lower_bounds, upper_bounds):
+    def get_bound_dp_lirpa_backward(self, layers, lbs, ubs):
         """
         This function is used to do a dp lirpa backward pass and get the bounds with current coefficients lower_a and upper_a.
         """
-
-        ##################
-        ### compute L(x, a)
-        ##################
-        b_term = None
-        rho = copy.deepcopy(self.initial_rho)
-        lay_idx = copy.deepcopy(self.initial_lay_idx)
+        # compute L(x, a)
+        C = deepcopy(self.C)
+        start_node = deepcopy(self.start_node)
         rho_split=False
 
-        with torch.enable_grad():
-            while lay_idx > 0:
-                lay = weights[lay_idx]
+        bias = None
+        lmbda = None
 
-                if b_term is None:
-                    b_term = lay.bias_backward(rho)#rho is of size (batch_size*output_size)
+        with torch.enable_grad():
+            for i in range(start_node, 0, -1):
+            # while start_node > 0:
+                layer = layers[i]
+
+                if bias is None:
+                    bias = layer.bias_backward(C)#rho is of size (batch_size*output_size)
                 else:
-                    b_term += lay.dp_bias_backward(rho_u_dp) + lay.bias_backward(rho_planet)
+                    bias += layer.dp_bias_backward(rho_u_dp) + layer.bias_backward(rho_planet)
 
                 if not rho_split:
-                    lbda = lay.backward(rho)#rho is of size (batch_size*output_size)
+                    lmbda = layer.backward(C)#rho is of size (batch_size*output_size)
                 else:
-                    lbda = lay.dp_backward(rho_u_dp) + lay.backward(rho_planet)
+                    lmbda = layer.dp_backward(rho_u_dp) + layer.backward(rho_planet)
                 
-                lbs = lower_bounds[lay_idx]#this is of input_size as they are lower_bounds on that layer input
-                ubs = upper_bounds[lay_idx]
+                lb = lbs[i]#this is of input_size as they are lower_bounds on that layer input
+                ub = ubs[i]
 
-                las = self.lower_a[lay_idx]
-                uas = self.upper_a[lay_idx]
+                a_l = self.lower_a[i]
+                a_u = self.upper_a[i]
 
-                #####
-                ## beta
-                beta_u = -  (uas * (lbs*ubs)) / (ubs - lbs)
-                beta_u.masked_fill_(lbs > 0, 0)
-                beta_u.masked_fill_(ubs <= 0, 0)
+                # beta
+                beta_u = -  (a_u * (lb*ub)) / (ub - lb)
+                beta_u.masked_fill_(lb > 0, 0)
+                beta_u.masked_fill_(ub <= 0, 0)
 
-                beta_l = torch.zeros_like(lbs)
+                beta_l = torch.zeros_like(lb)
 
-                ### POSSIBLE SPEEDUP
-                #### this can be implemented as a convolution
-                b_term += bdot(torch.where(lbda >= 0, beta_l.unsqueeze(1), beta_u.unsqueeze(1)), lbda)
-                #####
+                # this can be implemented as a convolution
+                bias += bdot(torch.where(lmbda >= 0, beta_l.unsqueeze(1), beta_u.unsqueeze(1)), lmbda)
 
+                # alpha
+                alpha_u_planet = a_u * ub / (ub - lb)
+                alpha_u_planet.masked_fill_(lb > 0, 1)
+                alpha_u_planet.masked_fill_(ub <= 0, 0)
 
-                #####
-                ## alpha
-                alpha_u_planet = uas * ubs / (ubs - lbs)
-                alpha_u_planet.masked_fill_(lbs > 0, 1)
-                alpha_u_planet.masked_fill_(ubs <= 0, 0)
+                alpha_u_dp = 1-a_u
+                alpha_u_dp.masked_fill_(lb > 0, 0)
+                alpha_u_dp.masked_fill_(ub <= 0, 0)
 
-                alpha_u_dp = 1-uas
-                alpha_u_dp.masked_fill_(lbs > 0, 0)
-                alpha_u_dp.masked_fill_(ubs <= 0, 0)
-
-                alpha_l = las
+                alpha_l = a_l
                 with torch.no_grad():
-                    alpha_l.masked_fill_(lbs > 0, 1)
-                    alpha_l.masked_fill_(ubs <= 0, 0)
-
-                zeros_ten = torch.zeros_like(ubs)
+                    alpha_l.masked_fill_(lb > 0, 1)
+                    alpha_l.masked_fill_(ub <= 0, 0)
 
                 rho_split=True
-                rho_planet = torch.where(lbda >= 0, alpha_l.unsqueeze(1), alpha_u_planet.unsqueeze(1)) * lbda#(output(batch_size modulo)*input shape)
-                rho_u_dp = torch.where(lbda >= 0, zeros_ten.unsqueeze(1), alpha_u_dp.unsqueeze(1)) * lbda
-
-                lay_idx -= 1
-
-            bound = opt_lirpa_input_dp(weights[0], b_term, rho_planet, rho_u_dp)
+                rho_planet = torch.where(lmbda >= 0, alpha_l.unsqueeze(1), alpha_u_planet.unsqueeze(1)) * lmbda#(output(batch_size modulo)*input shape)
+                rho_u_dp = torch.where(lmbda >= 0, torch.zeros_like(ub).unsqueeze(1), alpha_u_dp.unsqueeze(1)) * lmbda
+            bound = self.opt_lirpa_input_dp(layers[0], bias, rho_planet, rho_u_dp)
 
         return bound
+    
+    def opt_lirpa_input_dp(self, lay, bias, crown_A, convex_hull_A):
+        with torch.enable_grad():
+            bias += lay.dp_bias_backward(convex_hull_A) + lay.bias_backward(crown_A)
+            lin_eq = lay.dp_backward(convex_hull_A) + lay.backward(crown_A)
+            lin_eq_matrix = lin_eq.view(lin_eq.shape[0],lin_eq.shape[1],-1)
+            b, _ = torch.min(lin_eq_matrix, 2)
+            bound = bias + torch.clamp(b, None, 0)
+        return bound
 
-    def auto_lirpa_optimizer(self, weights, _, lower_bounds, upper_bounds):
+    def auto_lirpa_optimizer(self, layers, _, lbs, ubs):
         """
         # 1. Compute L(x, a)
         # 2. Compute dL/da 
         # 3. optimize a's using Adam.
         """
-        n_iters = 20
-        for _ in range(n_iters):
-
+        num_epochs = 50
+        for _ in range(num_epochs):
             # 1. Compute L(x, a)
-            bound = self.get_bound_dp_lirpa_backward(weights, lower_bounds, upper_bounds)
+            bound = self.get_bound_dp_lirpa_backward(layers, lbs, ubs)
             # 2. Compute dL/da 
             with torch.enable_grad():
                 bound_mean = bound.mean()
@@ -145,13 +120,3 @@ class AutoLirpa():
             self.optimizer.step()
             self.optimizer.zero_grad()
         return bound
-
-def opt_lirpa_input_dp(lay, b_term, rho_planet, rho_u_dp):
-    with torch.enable_grad():
-        b_term += lay.dp_bias_backward(rho_u_dp) + lay.bias_backward(rho_planet)
-        lin_eq = lay.dp_backward(rho_u_dp)
-        lin_eq += lay.backward(rho_planet)
-        lin_eq_matrix = lin_eq.view(lin_eq.shape[0],lin_eq.shape[1],-1)
-        b, _ = torch.min(lin_eq_matrix, 2)
-        bound = b_term + torch.clamp(b, None, 0)
-    return bound
