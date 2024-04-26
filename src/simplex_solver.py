@@ -8,6 +8,12 @@ from simplex_neuron import SimplexNeuron, BoundSimplexNeuron_Alpha
 from torch.optim import Adam
 
 class SimplexSolver:
+    def __init__(self, method: str='alpha-simplex', loss_fn: str='naive') -> None:
+        assert method in ['simplex', 'alpha-simplex']
+        assert loss_fn in ['naive', 'margin']
+        self.method = method
+        self.loss_fn = loss_fn
+
     def compute_bounds(self, model: nn.Sequential, x0: Tensor, eps: float):
         conditioned_model = simplex_propagation_orig(model, x0, eps)
         bounded_model = BoundedSequential.convert(conditioned_model)
@@ -15,23 +21,26 @@ class SimplexSolver:
         dim = x0.shape[1]
         crown_ub, lb = bounded_model.compute_bounds(torch.zeros(batch_size, 2*dim), upper=True, lower=True)
         simplexified_model = self.simplexify(bounded_model)
-        bounded_simplex_model = BoundedSequential.convert(simplexified_model)
+        bounded_simplex_model = BoundedSequential.convert(simplexified_model, self.method)
 
-        alphas = []
-        for l in bounded_simplex_model.children():
-            if isinstance(l, BoundSimplexNeuron_Alpha):
-                alphas.append(l.alpha)
-        optimizer = Adam(alphas, lr=1e-1)
-        for _ in range(50):
+        if self.method == 'alpha-simplex':
+            alphas = []
+            for l in bounded_simplex_model.children():
+                if isinstance(l, BoundSimplexNeuron_Alpha):
+                    alphas.append(l.alpha)
+            optimizer = Adam(alphas, lr=1e-1)
+            for _ in range(50):
+                ub, _ = bounded_simplex_model.compute_bounds(torch.zeros(batch_size, 2*dim), upper=True, lower=False)
+                optimizer.zero_grad()
+                loss = ub.mean()
+                loss.backward(retain_graph=True)  # Retain the computational graph
+                optimizer.step()
+                with torch.no_grad():
+                    for l in bounded_simplex_model.children():
+                        if isinstance(l, BoundSimplexNeuron_Alpha):
+                            l.alpha.clamp_(min=0, max=1)
+        elif self.method == 'simplex':
             ub, _ = bounded_simplex_model.compute_bounds(torch.zeros(batch_size, 2*dim), upper=True, lower=False)
-            optimizer.zero_grad()
-            loss = ub.mean()
-            loss.backward(retain_graph=True)  # Retain the computational graph
-            optimizer.step()
-            with torch.no_grad():
-                for l in bounded_simplex_model.children():
-                    if isinstance(l, BoundSimplexNeuron_Alpha):
-                        l.alpha.clamp_(min=0, max=1)
         return (lb, torch.min(ub, crown_ub))
 
     def simplexify(self, bounded_model: BoundedSequential):
@@ -69,7 +78,7 @@ if __name__=="__main__":
 
     eps = 10
 
-    solver = SimplexSolver()
+    solver = SimplexSolver(method='alpha-simplex')
     lb, ub = solver.compute_bounds(model, x_test, eps)
     
     def print_bounds(lb, ub, batch_sz, y_sz):
