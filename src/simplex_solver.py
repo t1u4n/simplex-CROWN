@@ -4,7 +4,8 @@ import torch.nn as nn
 from copy import deepcopy
 from simplex_propagation import simplex_propagation_orig
 from crown import BoundedSequential
-from simplex_neuron import SimplexNeuron
+from simplex_neuron import SimplexNeuron, BoundSimplexNeuron_Alpha
+from torch.optim import Adam
 
 class SimplexSolver:
     def compute_bounds(self, model: nn.Sequential, x0: Tensor, eps: float):
@@ -15,7 +16,22 @@ class SimplexSolver:
         crown_ub, lb = bounded_model.compute_bounds(torch.zeros(batch_size, 2*dim), upper=True, lower=True)
         simplexified_model = self.simplexify(bounded_model)
         bounded_simplex_model = BoundedSequential.convert(simplexified_model)
-        ub, _ = bounded_simplex_model.compute_bounds(torch.zeros(batch_size, 2*dim), upper=True, lower=False)
+
+        alphas = []
+        for l in bounded_simplex_model.children():
+            if isinstance(l, BoundSimplexNeuron_Alpha):
+                alphas.append(l.alpha)
+        optimizer = Adam(alphas, lr=1e-1)
+        for _ in range(50):
+            ub, _ = bounded_simplex_model.compute_bounds(torch.zeros(batch_size, 2*dim), upper=True, lower=False)
+            optimizer.zero_grad()
+            loss = ub.mean()
+            loss.backward(retain_graph=True)  # Retain the computational graph
+            optimizer.step()
+            with torch.no_grad():
+                for l in bounded_simplex_model.children():
+                    if isinstance(l, BoundSimplexNeuron_Alpha):
+                        l.alpha.clamp_(min=0, max=1)
         return (lb, torch.min(ub, crown_ub))
 
     def simplexify(self, bounded_model: BoundedSequential):
@@ -51,7 +67,7 @@ if __name__=="__main__":
     output = model(x_test)
     y_size = output.size(1)
 
-    eps = 0.3
+    eps = 10
 
     solver = SimplexSolver()
     lb, ub = solver.compute_bounds(model, x_test, eps)
@@ -83,9 +99,9 @@ if __name__=="__main__":
     total_diff = 0
     for i in range(batch_size):
         for j in range(y_size):
-            diff = max(0, lirpa_diff[i][j].item() - simplex_diff[i][j].item())
+            diff = lirpa_diff[i][j].item() - simplex_diff[i][j].item()
             diff /= abs(lirpa_diff[i][j].item())
-            total_diff += diff
+            total_diff += max(0, diff)
             print("f_{}: {:+.4f}%".format(j, diff * 100))
 
-    print('\nAverage relative difference: {:+.4f}%'.format(total_diff/(batch_size*y_size) * 100))
+    print('\nAverage relative difference: {:+.4f}%'.format(total_diff/(batch_size) * 100))
