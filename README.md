@@ -4,7 +4,7 @@ This project is to integrate the work of [Overcoming the Convex Barrier for Simp
 ## Quick Start
 Use `compute_bounds` interface in `SimplexSolver` class under `src/simplex_solver.py` to compute bounds. We also provided an example in `src/simplex_solver.py`
 
-## Ref
+## References
 This work is based on following papers:
 ```
 @article{behl2021overcoming,
@@ -34,3 +34,5 @@ This work is based on following papers:
   year={2020}
 }
 ```
+
+**Please notice that `src/lirpa` directory is the code for original method provided in [Overcoming the Convex Barrier for Simplex Inputs](https://openreview.net/pdf?id=JXREUkyHi7u).**
