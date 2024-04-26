@@ -12,9 +12,31 @@ class SimplexSolver:
         assert method in ['simplex', 'alpha-simplex']
         assert loss_fn in ['naive', 'margin']
         self.method = method
-        self.loss_fn = loss_fn
 
-    def compute_bounds(self, model: nn.Sequential, x0: Tensor, eps: float):
+        def _naive_loss_fn(label, upper_bounds, lower_bounds):
+            return upper_bounds.mean()
+    
+        def _margin_loss_fn(label, upper_bounds, lower_bounds):
+            correct_lb = lower_bounds[0][label]
+            incorrect_labels_upper_bounds = upper_bounds.clone()
+            incorrect_labels_upper_bounds[0][label] = float("inf")
+            max_incorrect_upper_bounds = incorrect_labels_upper_bounds.max(dim=1)[0]
+            return (correct_lb - max_incorrect_upper_bounds)
+        
+        if loss_fn == 'naive':
+            self.loss_fn = _naive_loss_fn
+        elif loss_fn == 'margin':
+            self.loss_fn = _margin_loss_fn
+
+    def compute_bounds(
+            self,
+            model: nn.Sequential,
+            x0: Tensor,
+            eps: float,
+            label: int,
+            optimize_epochs: int=50, 
+            lr :float=1e-3
+        ):
         conditioned_model = simplex_propagation_orig(model, x0, eps)
         bounded_model = BoundedSequential.convert(conditioned_model)
         batch_size = x0.shape[0]
@@ -28,11 +50,11 @@ class SimplexSolver:
             for l in bounded_simplex_model.children():
                 if isinstance(l, BoundSimplexNeuron_Alpha):
                     alphas.append(l.alpha)
-            optimizer = Adam(alphas, lr=1e-1)
-            for _ in range(50):
+            optimizer = Adam(alphas, lr=lr)
+            for _ in range(optimize_epochs):
                 ub, _ = bounded_simplex_model.compute_bounds(torch.zeros(batch_size, 2*dim), upper=True, lower=False)
                 optimizer.zero_grad()
-                loss = ub.mean()
+                loss = self.loss_fn(label, ub, lb)
                 loss.backward(retain_graph=True)  # Retain the computational graph
                 optimizer.step()
                 with torch.no_grad():
@@ -60,6 +82,13 @@ class SimplexSolver:
     
 # Sanity check
 if __name__=="__main__":
+    def print_bounds(lb, ub, batch_sz, y_sz):
+        for i in range(batch_sz):
+            for j in range(y_sz):
+                assert lb[i][j] <= output[i][j] and ub[i][j] >= output[i][j]
+                print('f_{j}(x_{i}): {l:8.4f} <= f_{j}(x_{i}+delta) <= {u:8.4f}'.format(
+                    j=j, i=i, l=lb[i][j].item(), u=ub[i][j].item()))
+
     model = nn.Sequential(
                 nn.Linear(28*28, 128),
                 nn.ReLU(),
@@ -78,15 +107,8 @@ if __name__=="__main__":
 
     eps = 10
 
-    solver = SimplexSolver(method='alpha-simplex')
-    lb, ub = solver.compute_bounds(model, x_test, eps)
-    
-    def print_bounds(lb, ub, batch_sz, y_sz):
-        for i in range(batch_sz):
-            for j in range(y_sz):
-                assert lb[i][j] <= output[i][j] and ub[i][j] >= output[i][j]
-                print('f_{j}(x_{i}): {l:8.4f} <= f_{j}(x_{i}+delta) <= {u:8.4f}'.format(
-                    j=j, i=i, l=lb[i][j].item(), u=ub[i][j].item()))
+    solver = SimplexSolver(method='alpha-simplex', loss_fn='naive')
+    lb, ub = solver.compute_bounds(model, x_test, eps, label, 50, 1e-1)
     
     print_bounds(lb, ub, batch_size, y_size)
 
