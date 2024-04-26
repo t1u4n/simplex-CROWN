@@ -1,4 +1,4 @@
-# L1-norm based perturbation CROWN
+# simplex-CROWN for L1-norm based perturbation
 This project is to integrate the work of [Overcoming the Convex Barrier for Simplex Inputs](https://openreview.net/pdf?id=JXREUkyHi7u) to CROWN algorithm. It cleverly uses the simplex to propose a tighter boundary for the l1 perturbation of the convex activation function network, improving the effect of the CROWN algorithm.
 
 ## Quick Start
