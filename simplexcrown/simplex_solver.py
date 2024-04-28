@@ -2,9 +2,9 @@ import torch
 from torch import Tensor
 import torch.nn as nn
 from copy import deepcopy
-from simplex_propagation import simplex_propagation_orig
-from crown import BoundedSequential
-from simplex_neuron import SimplexNeuron, BoundSimplexNeuron_Alpha
+from simplexcrown.simplex_propagation import simplex_propagation_orig
+from simplexcrown.crown import BoundedSequential
+from simplexcrown.simplex_neuron import SimplexNeuron, BoundSimplexNeuron_Alpha
 from torch.optim import Adam
 
 class SimplexSolver:
@@ -99,7 +99,7 @@ if __name__=="__main__":
     model.load_state_dict(torch.load('models/relu_model.pth'))
     model.eval()
 
-    x_test, label = torch.load('data/data1.pth')
+    x_test, label = torch.load('data/data2.pth')
     batch_size = x_test.size(0)
     x_test = x_test.reshape(batch_size, -1)
     output = model(x_test)

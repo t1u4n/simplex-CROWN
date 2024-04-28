@@ -1,9 +1,9 @@
 import torch
 import torch.nn as nn
 import numpy as np
-from linear import BoundLinear
-from relu import BoundReLU
-from simplex_neuron import SimplexNeuron, BoundSimplexNeuron, BoundSimplexNeuron_Alpha
+from simplexcrown.linear import BoundLinear
+from simplexcrown.relu import BoundReLU
+from simplexcrown.simplex_neuron import SimplexNeuron, BoundSimplexNeuron, BoundSimplexNeuron_Alpha
 
 
 class BoundedSequential(nn.Sequential):

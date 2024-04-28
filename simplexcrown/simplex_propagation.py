@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 from copy import deepcopy
-from simplex_neuron import SimplexNeuron
+from simplexcrown.simplex_neuron import SimplexNeuron
 
 def convert_first_layer(layer: nn.Linear, x0: Tensor, eps: float) -> nn.Linear:
     # shape of W: [out_features, in_features]
