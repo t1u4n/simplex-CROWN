@@ -2,7 +2,10 @@
 This project is to integrate the work of [Overcoming the Convex Barrier for Simplex Inputs](https://openreview.net/pdf?id=JXREUkyHi7u) to CROWN algorithm. It cleverly uses the simplex to propose a tighter boundary for the l1 perturbation of the convex activation function network, improving the effect of the CROWN algorithm.
 
 ## Quick Start
-Use `compute_bounds` interface in `SimplexSolver` class under `src/simplex_solver.py` to compute bounds. We also provided an example in `src/simplex_solver.py`
+Use `compute_bounds` interface in `SimplexSolver` class under `simplexcrown/simplex_solver.py` to compute bounds. We also provided an example in `simple_eval.py`
+
+## Reproduce the results on MNIST dataset
+We trained multiple MLP models with different layer using MNIST dataset by `mlp_train.py` script, the pre-trained models are under `/models` directory. You can use `mnist.py` script to perform experiments on mnist.
 
 ## References
 This work is based on following papers:
