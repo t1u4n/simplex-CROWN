@@ -38,4 +38,4 @@ This work is based on following papers:
 }
 ```
 
-**Please notice that `src/lirpa` directory is the code for original method provided in [Overcoming the Convex Barrier for Simplex Inputs](https://openreview.net/pdf?id=JXREUkyHi7u). Also `src/crown.py`, `src/linear.py`, `src/relu.py` are based on the code `git@github.com:huanzhang12/ECE584-SP24-assignment2.git` from @huanzhang12 and @schawla7.**
+**Please notice that `simplexcrown/lirpa` directory is the code for original method provided in [Overcoming the Convex Barrier for Simplex Inputs](https://openreview.net/pdf?id=JXREUkyHi7u). Also `simplexcrown/crown.py`, `simplexcrown/linear.py`, `simplexcrown/relu.py` are based on the code `git@github.com:huanzhang12/ECE584-SP24-assignment2.git` from @huanzhang12 and @schawla7.**
